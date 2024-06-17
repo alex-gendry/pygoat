@@ -1,0 +1,40 @@
+name: Fortify Security Scan (FCLI)
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  Fortify-SAST-SCA:
+    runs-on: self-hosted
+    container:
+      image: fortifydocker/fortify-ci-tools
+    permissions: write-all
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python Setup
+        run: |
+          apt update
+          apt install -y python3-dev
+          apt-get install build-essential -y
+
+      - name: Run Fortify on Demand analysis
+        run: |
+          # FoD Login
+          fcli fod session login --url ${{secrets.FOD_URL}} --client-id ${{secrets.FOD_CLIENT_ID}}  --client-secret ${{secrets.FOD_CLIENT_SECRET}}
+          
+          # Create release
+          fcli fod release create "${{ github.event.repository.name }}:${{ github.ref_name }}" --status Production  --skip-if-exists --store rel
+          fcli fod sast setup --release "::rel::" --assessment-type "Static+ Assessment" --frequency Subscription --entitlement-id ${{secrets.FOD_ENTITLEMENT_ID}} --technology-stack "Auto Detect" --audit-preference Automated --oss
+          
+          # Run SAST & SCA scan
+          #pip install -U -r requirements.txt
+          scancentral package -o package.zip -oss -pyr requirements.txt -yv 3 
+          fcli fod sast start --release "::rel::" -f package.zip --store sastscan
+          fcli fod sast wait-for "::sastscan::"
